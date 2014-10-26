@@ -16,7 +16,8 @@ import (
 var (
 	log = golog.LoggerFor("timeoutchecker")
 
-	target = flag.String("url", "https://news.ycombinator.com/", "url to test")
+	target    = flag.String("url", "https://news.ycombinator.com/", "url to test")
+	keepalive = flag.Int("keepalive", 0, "interval at which to send empty data as keepalives (0 means don't use keepalives)")
 )
 
 func main() {
@@ -26,7 +27,11 @@ func main() {
 		log.Fatalf("Unable to parse url %s: %s", target, err)
 	}
 
-	for i := 1; i < 70; i += 1 {
+	increment := 1
+	if *keepalive > 0 {
+		increment = *keepalive
+	}
+	for i := 1; i < 70; i += increment {
 		test(targetUrl, i)
 	}
 }
@@ -36,7 +41,18 @@ func test(targetUrl *url.URL, wait int) {
 
 	tr := &http.Transport{
 		Dial: func(network, addr string) (conn net.Conn, err error) {
-			defer time.Sleep(sleepTime)
+			if *keepalive > 0 {
+				defer func() {
+					if err == nil {
+						for i := 0; i < int(sleepTime.Seconds()) / *keepalive; i++ {
+							time.Sleep(time.Duration(*keepalive) * time.Second)
+							conn.Write([]byte{})
+						}
+					}
+				}()
+			} else {
+				defer time.Sleep(sleepTime)
+			}
 			return net.Dial("tcp", addr)
 		},
 	}
